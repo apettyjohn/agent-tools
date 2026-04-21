@@ -32,7 +32,9 @@ class AgentRegistry:
     def add_card(self, agent_id: str, url: str, card_data: Dict[str, Any]) -> None:
         """Add an agent card to the registry."""
         self._cards[agent_id] = card_data
-        self._urls[agent_id] = url
+        # Store the A2A URL if available, otherwise build it
+        a2a_url = card_data.get("_a2a_url", f"{url.rstrip('/')}/a2a/agents/{agent_id}")
+        self._urls[agent_id] = a2a_url
 
     def get_card(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """Get an agent card by ID."""
@@ -69,9 +71,13 @@ async def _fetch_agent_card(client, agent_id: str, url: str) -> Optional[Dict[st
     """Fetch an agent card from a single URL."""
     try:
         # Agno A2A endpoint: /a2a/agents/{id}/.well-known/agent-card.json
-        response = await client.get(f"{url.rstrip('/')}/a2a/agents/{agent_id}/.well-known/agent-card.json", timeout=10.0)
+        full_url = f"{url.rstrip('/')}/a2a/agents/{agent_id}/.well-known/agent-card.json"
+        response = await client.get(full_url, timeout=10.0)
         if response.status_code == 200:
-            return response.json()
+            card = response.json()
+            # Store the full A2A URL for this agent
+            card["_a2a_url"] = f"{url.rstrip('/')}/a2a/agents/{agent_id}"
+            return card
         else:
             log_warning(f"Failed to fetch agent card for '{agent_id}' from {url}: {response.status_code}")
             return None
@@ -202,22 +208,12 @@ class A2AToolkit(Toolkit):
             }
 
         try:
-            from agno.client.a2a import A2AClient
-
-            client = A2AClient(url)
-            result = client.send_message(
+            return asyncio.run(self.async_send_message_to_agent(
+                agent_id=agent_id,
                 message=message,
                 context_id=context_id,
                 user_id=user_id,
-            )
-
-            return {
-                "success": True,
-                "agent_id": agent_id,
-                "response": result.content if hasattr(result, "content") else str(result),
-                "task_id": getattr(result, "task_id", None),
-            }
-
+            ))
         except Exception as e:
             log_error(f"Error sending message to agent {agent_id}: {e}")
             return {

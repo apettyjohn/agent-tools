@@ -1,0 +1,31 @@
+services:
+  playwright-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: playwright-api
+    ports:
+      - "8002:8002"  # Agent A2A port
+    environment:
+      - NODE_ENV=production
+      - PYTHONPATH=/app
+      - AGENT_HOST=0.0.0.0
+      - AGENT_PORT=8002
+      # Required: Set your OpenRouter API key
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    volumes:
+      # Mount for development to hot-reload code
+      - .:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - playwright-network
+
+networks:
+  playwright-network:
+    driver: bridge
