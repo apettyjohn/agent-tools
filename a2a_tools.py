@@ -111,6 +111,7 @@ class A2AToolkit(Toolkit):
         agent_urls: Optional[Dict[str, str]] = None,
         auto_discover: bool = True,
         name: str = "a2a_toolkit",
+        sender_agent_id: Optional[str] = None,
     ):
         """Initialize the A2A Toolkit.
 
@@ -119,13 +120,24 @@ class A2AToolkit(Toolkit):
                         e.g. {"gcode": "http://localhost:8001", "kit": "http://localhost:8000"}
             auto_discover: Whether to automatically discover agents on init (default: True)
             name: Toolkit name
+            sender_agent_id: The agent ID of this toolkit (used to identify sender in messages).
+                           Can also be set later via configure_for_agent().
         """
-        super().__init__(name=name)
+        super().__init__(
+            name=name,
+            tools=[
+                self.send_message_to_agent,
+                self.get_agents_table,
+                self.get_agent_info,
+                self.discover_agents,
+            ],
+        )
 
         self.agent_urls_map: Dict[str, str] = agent_urls or {}  # agent_id -> base_url
         self.agent_urls: List[str] = list(self.agent_urls_map.values())
         self.registry: AgentRegistry = AgentRegistry()
         self._initialized: bool = False
+        self.sender_agent_id: Optional[str] = sender_agent_id
 
         if auto_discover and self.agent_urls:
             # Run discovery in the event loop if one exists
@@ -187,6 +199,7 @@ class A2AToolkit(Toolkit):
         message: str,
         context_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Send a message to a specific agent and return the response.
 
@@ -195,6 +208,8 @@ class A2AToolkit(Toolkit):
             message: The message text to send
             context_id: Optional session/context ID for multi-turn conversations
             user_id: Optional user identifier
+            metadata: Optional additional metadata to include in the message.
+                     Sender identity is automatically included if sender_agent_id is set.
 
         Returns:
             Dict containing the response from the agent
@@ -213,6 +228,7 @@ class A2AToolkit(Toolkit):
                 message=message,
                 context_id=context_id,
                 user_id=user_id,
+                metadata=metadata,
             ))
         except Exception as e:
             log_error(f"Error sending message to agent {agent_id}: {e}")
@@ -228,6 +244,7 @@ class A2AToolkit(Toolkit):
         message: str,
         context_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Async version of send_message_to_agent.
 
@@ -236,6 +253,8 @@ class A2AToolkit(Toolkit):
             message: The message text to send
             context_id: Optional session/context ID for multi-turn conversations
             user_id: Optional user identifier
+            metadata: Optional additional metadata to include in the message.
+                     Sender identity is automatically included if sender_agent_id is set.
 
         Returns:
             Dict containing the response from the agent
@@ -251,11 +270,20 @@ class A2AToolkit(Toolkit):
         try:
             from agno.client.a2a import A2AClient
 
+            # Build sender metadata if sender_agent_id is configured
+            msg_metadata = metadata.copy() if metadata else {}
+            if self.sender_agent_id:
+                msg_metadata["sender"] = {
+                    "agent_id": self.sender_agent_id,
+                    "name": self.name,
+                }
+
             client = A2AClient(url)
             result = await client.send_message(
                 message=message,
                 context_id=context_id,
                 user_id=user_id,
+                metadata=msg_metadata if msg_metadata else None,
             )
 
             return {
